@@ -11,13 +11,14 @@ import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
+import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 public final class CircularBatteryHook implements IXposedHookLoadPackage {
     private static final String SYSTEM_UI = "com.android.systemui";
     private static final String BATTERY_VIEW = "com.android.systemui.battery.BatteryMeterView";
 
     @Override
-    public void handleLoadPackage(final LoadPackageParam lpparam) {
+    public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) {
         if (!SYSTEM_UI.equals(lpparam.packageName)) {
             return;
         }
@@ -77,7 +78,7 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
                 return;
             }
             CircularBatteryDrawable circular = (CircularBatteryDrawable) drawable;
-            circular.setLevel(getIntField(view, "mLevel"));
+            circular.setBatteryLevel(getIntField(view, "mLevel"));
             circular.setCharging(getBooleanField(view, "mPluggedIn"));
             circular.setPowerSave(getBooleanField(view, "mPowerSaveEnabled"));
             int color = getIntField(view, "mTextColor");

@@ -20,7 +20,7 @@ public final class CircularBatteryDrawable extends Drawable {
         color = 0xffffffff;
     }
 
-    public void setLevel(int level) {
+    public void setBatteryLevel(int level) {
         this.level = Math.max(0, Math.min(100, level));
     }
 
