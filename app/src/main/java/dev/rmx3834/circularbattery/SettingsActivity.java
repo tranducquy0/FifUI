@@ -5,6 +5,8 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;
@@ -60,12 +62,18 @@ public final class SettingsActivity extends Activity {
 
         addSection(page, "STATUS BAR CLOCK");
         LinearLayout clock = card(page);
-        addSwitch(clock, "Show clock", "Keep the status-bar clock visible", true);
-        addSwitch(clock, "Show seconds", "Update the clock every second", false);
-        addSwitch(clock, "Use 24-hour time", "Override the system time format", false);
-        addSlider(clock, "Text size", "Set clock text size", 14, 10, 22);
-        addSlider(clock, "Text weight", "Adjust clock text emphasis", 400, 300, 700);
-        addSwitch(clock, "Custom color", "Use a fixed clock color", false);
+        addSwitch(clock, "Show clock", "Keep the status-bar clock visible",
+                settings.getBoolean(ModuleSettings.CLOCK_VISIBLE, true), ModuleSettings.CLOCK_VISIBLE);
+        addSwitch(clock, "Show seconds", "Update the clock every second",
+                settings.getBoolean(ModuleSettings.CLOCK_SECONDS, false), ModuleSettings.CLOCK_SECONDS);
+        addSwitch(clock, "Use 24-hour time", "Override the system time format",
+                settings.getBoolean(ModuleSettings.CLOCK_24_HOUR, false), ModuleSettings.CLOCK_24_HOUR);
+        addSlider(clock, "Text size", "Set clock text size",
+                settings.getInt(ModuleSettings.CLOCK_SIZE, 14), 10, 22, ModuleSettings.CLOCK_SIZE);
+        addSlider(clock, "Text weight", "Adjust clock text emphasis",
+                settings.getInt(ModuleSettings.CLOCK_WEIGHT, 400), 300, 700, ModuleSettings.CLOCK_WEIGHT);
+        addSwitch(clock, "Custom color", "Use a fixed clock color",
+                settings.getBoolean(ModuleSettings.CLOCK_CUSTOM_COLOR, false), ModuleSettings.CLOCK_CUSTOM_COLOR);
         addColorChoices(clock);
         addFormatField(clock);
 
@@ -159,11 +167,16 @@ public final class SettingsActivity extends Activity {
         int[] colors = {Color.WHITE, Color.BLACK, ACCENT, Color.rgb(67, 135, 255), Color.rgb(38, 166, 112)};
         for (int color : colors) {
             View swatch = new View(this);
+            swatch.setContentDescription("Clock color " + Integer.toHexString(color));
+            swatch.setClickable(true);
+            swatch.setFocusable(true);
             GradientDrawable dot = new GradientDrawable();
             dot.setShape(GradientDrawable.OVAL);
             dot.setColor(color);
-            dot.setStroke(dp(1), Color.rgb(220, 222, 226));
+            dot.setStroke(dp(settings.getInt(ModuleSettings.CLOCK_COLOR, Color.WHITE) == color ? 3 : 1),
+                    settings.getInt(ModuleSettings.CLOCK_COLOR, Color.WHITE) == color ? ACCENT : Color.rgb(220, 222, 226));
             swatch.setBackground(dot);
+            swatch.setOnClickListener(view -> settings.edit().putInt(ModuleSettings.CLOCK_COLOR, color).apply());
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(24), dp(24));
             lp.leftMargin = dp(7);
             row.addView(swatch, lp);
@@ -185,8 +198,16 @@ public final class SettingsActivity extends Activity {
         input.setSingleLine(true);
         input.setTextSize(14);
         input.setHint("System default");
+        input.setText(settings.getString(ModuleSettings.CLOCK_FORMAT, ""));
         input.setTextColor(PRIMARY);
         input.setHintTextColor(SECONDARY);
+        input.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence text, int start, int before, int count) {
+                settings.edit().putString(ModuleSettings.CLOCK_FORMAT, text.toString()).apply();
+            }
+            @Override public void afterTextChanged(Editable text) {}
+        });
         block.addView(input, params(-1, -2));
         parent.addView(block);
     }

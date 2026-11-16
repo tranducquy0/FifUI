@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="Circular Battery Xposed"
+        android:label="FifUI"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
         <activity
             android:name=".SettingsActivity"
@@ -15,7 +15,7 @@
             android:value="true" />
         <meta-data
             android:name="xposeddescription"
-            android:value="Replace the SystemUI battery icon with a circular icon." />
+            android:value="Customize the SystemUI battery icon and status-bar clock." />
         <meta-data
             android:name="xposedminversion"
             android:value="93" />
