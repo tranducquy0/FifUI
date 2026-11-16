@@ -7,6 +7,12 @@ final class ModuleSettings {
     static final String BATTERY_THICKNESS = "battery_thickness";
     static final String BATTERY_CHARGING = "battery_charging";
     static final String BATTERY_POWER_SAVE = "battery_power_save";
+    static final String BATTERY_CUSTOM_COLOR = "battery_custom_color_enabled";
+    static final String BATTERY_COLOR = "battery_color";
+    static final String BATTERY_COLOR_NORMAL = "battery_color_normal";
+    static final String BATTERY_COLOR_LOW = "battery_color_low";
+    static final String BATTERY_COLOR_CHARGING = "battery_color_charging";
+    static final String BATTERY_COLOR_POWER_SAVE = "battery_color_power_save";
     static final String CLOCK_VISIBLE = "clock_visible";
     static final String CLOCK_SECONDS = "clock_seconds_enabled";
     static final String CLOCK_24_HOUR = "clock_24_hour";

@@ -26,6 +26,8 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public final class CircularBatteryHook implements IXposedHookLoadPackage {
     private static final String SYSTEM_UI = "com.android.systemui";
     private static final String BATTERY_VIEW = "com.android.systemui.battery.BatteryMeterView";
+    private static final String BATTERY_CONTROLLER_CALLBACK =
+            "com.android.systemui.battery.BatteryMeterViewController$3";
     private static final String CLOCK = "com.android.systemui.statusbar.policy.Clock";
     private static volatile Bundle settings;
     private static volatile boolean settingsReadFailureLogged;
@@ -40,6 +42,7 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
 
         hookDeferredClassLookup();
         hookClassIfAvailable(BATTERY_VIEW, lpparam.classLoader);
+        hookClassIfAvailable(BATTERY_CONTROLLER_CALLBACK, lpparam.classLoader);
         hookClassIfAvailable(CLOCK, lpparam.classLoader);
     }
 
@@ -65,9 +68,11 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
     }
 
     private static void onSystemUiClassLoaded(String name, Object result) {
-        if (!(result instanceof Class<?>) || !(BATTERY_VIEW.equals(name) || CLOCK.equals(name))) return;
+        if (!(result instanceof Class<?>) || !(BATTERY_VIEW.equals(name)
+                || BATTERY_CONTROLLER_CALLBACK.equals(name) || CLOCK.equals(name))) return;
         Class<?> loadedClass = (Class<?>) result;
         if (BATTERY_VIEW.equals(name)) hookBatteryClass(loadedClass);
+        else if (BATTERY_CONTROLLER_CALLBACK.equals(name)) hookBatteryPowerSaveClass(loadedClass);
         else hookClockClass(loadedClass);
     }
 
@@ -76,10 +81,35 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
             Class<?> loadedClass = XposedHelpers.findClassIfExists(name, classLoader);
             if (loadedClass != null) {
                 if (BATTERY_VIEW.equals(name)) hookBatteryClass(loadedClass);
+                else if (BATTERY_CONTROLLER_CALLBACK.equals(name)) hookBatteryPowerSaveClass(loadedClass);
                 else hookClockClass(loadedClass);
             }
         } catch (Throwable t) {
             XposedBridge.log("CircularBattery: initial lookup failed for " + name + ": " + t);
+        }
+    }
+
+    private static void hookBatteryPowerSaveClass(Class<?> callbackClass) {
+        synchronized (HOOKED_CLASSES) {
+            if (HOOKED_CLASSES.contains(callbackClass)) return;
+            try {
+                XposedHelpers.findAndHookMethod(callbackClass, "onPowerSaveChanged", boolean.class,
+                        new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                try {
+                                    Object controller = getField(param.thisObject, "this$0");
+                                    syncDrawable(getField(controller, "mView"));
+                                } catch (Throwable t) {
+                                    XposedBridge.log("CircularBattery: failed to sync after power saver change: " + t);
+                                }
+                            }
+                        });
+                HOOKED_CLASSES.add(callbackClass);
+                XposedBridge.log("CircularBattery: hooked battery power saver callback");
+            } catch (Throwable t) {
+                XposedBridge.log("CircularBattery: failed to hook battery power saver callback: " + t);
+            }
         }
     }
 
@@ -307,7 +337,7 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
             circular.setBatteryLevel(getIntField(view, "mLevel"));
             circular.setCharging(getBooleanField(view, "mPluggedIn"));
             circular.setPowerSave(getBooleanField(view, "mPowerSaveEnabled"));
-            int color = getBatteryStateColor(view);
+            int color = getBatteryColorForCurrentState(view);
             circular.setColor(color);
             Object percentView = getField(view, "mBatteryPercentView");
             if (percentView instanceof TextView) {
@@ -320,6 +350,36 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
         } catch (Throwable t) {
             XposedBridge.log("CircularBattery: failed to sync drawable: " + t);
         }
+    }
+
+    private static int getBatteryColorForCurrentState(Object view) {
+        View batteryView = (View) view;
+        if (!getBooleanSetting(batteryView, ModuleSettings.BATTERY_CUSTOM_COLOR, false)) {
+            return getBatteryStateColor(view);
+        }
+
+        String stateColorKey = null;
+        try {
+            Object chargingResult = XposedHelpers.callMethod(view, "isCharging");
+            boolean charging = chargingResult instanceof Boolean && (Boolean) chargingResult;
+            boolean powerSave = getBooleanField(view, "mPowerSaveEnabled");
+            int level = getIntField(view, "mLevel");
+            if (charging) stateColorKey = ModuleSettings.BATTERY_COLOR_CHARGING;
+            else if (powerSave) stateColorKey = ModuleSettings.BATTERY_COLOR_POWER_SAVE;
+            else if (level <= 20) stateColorKey = ModuleSettings.BATTERY_COLOR_LOW;
+            else stateColorKey = ModuleSettings.BATTERY_COLOR_NORMAL;
+        } catch (Throwable t) {
+            XposedBridge.log("CircularBattery: failed to determine battery color state: " + t);
+        }
+
+        Bundle currentSettings = settings;
+        if (currentSettings != null && stateColorKey != null && currentSettings.containsKey(stateColorKey)) {
+            return currentSettings.getInt(stateColorKey);
+        }
+        if (currentSettings != null && currentSettings.containsKey(ModuleSettings.BATTERY_COLOR)) {
+            return currentSettings.getInt(ModuleSettings.BATTERY_COLOR);
+        }
+        return getBatteryStateColor(view);
     }
 
     /** Reads ThemedBatteryDrawable.levelColor, which SystemUI calculates from battery state. */

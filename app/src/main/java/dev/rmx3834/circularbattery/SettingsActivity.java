@@ -27,6 +27,7 @@ public final class SettingsActivity extends Activity {
     private static final int SECONDARY = Color.rgb(119, 124, 132);
     private SharedPreferences settings;
     private Switch clockColorToggle;
+    private Switch batteryColorToggle;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -59,6 +60,18 @@ public final class SettingsActivity extends Activity {
                 settings.getBoolean(ModuleSettings.BATTERY_ENABLED, true), ModuleSettings.BATTERY_ENABLED);
         addSlider(battery, "Ring thickness", "Adjust the battery ring weight",
                 settings.getInt(ModuleSettings.BATTERY_THICKNESS, 15), 5, 30, ModuleSettings.BATTERY_THICKNESS);
+        addSwitch(battery, "Custom color", "Use one color for the ring and percentage",
+                settings.getBoolean(ModuleSettings.BATTERY_CUSTOM_COLOR, false), ModuleSettings.BATTERY_CUSTOM_COLOR);
+        addColorChoices(battery, "Battery color", ModuleSettings.BATTERY_COLOR,
+                ModuleSettings.BATTERY_CUSTOM_COLOR);
+        addColorChoices(battery, "Normal state", ModuleSettings.BATTERY_COLOR_NORMAL,
+                ModuleSettings.BATTERY_CUSTOM_COLOR);
+        addColorChoices(battery, "Low battery state", ModuleSettings.BATTERY_COLOR_LOW,
+                ModuleSettings.BATTERY_CUSTOM_COLOR);
+        addColorChoices(battery, "Charging state", ModuleSettings.BATTERY_COLOR_CHARGING,
+                ModuleSettings.BATTERY_CUSTOM_COLOR);
+        addColorChoices(battery, "Power saver state", ModuleSettings.BATTERY_COLOR_POWER_SAVE,
+                ModuleSettings.BATTERY_CUSTOM_COLOR);
         addSwitch(battery, "Charging indicator", "Show a center dot while charging",
                 settings.getBoolean(ModuleSettings.BATTERY_CHARGING, true), ModuleSettings.BATTERY_CHARGING);
         addSwitch(battery, "Power saver indicator", "Show a center line in power saver",
@@ -78,7 +91,8 @@ public final class SettingsActivity extends Activity {
                 settings.getInt(ModuleSettings.CLOCK_WEIGHT, 400), 300, 700, ModuleSettings.CLOCK_WEIGHT);
         addSwitch(clock, "Custom color", "Use a fixed clock color",
                 settings.getBoolean(ModuleSettings.CLOCK_CUSTOM_COLOR, false), ModuleSettings.CLOCK_CUSTOM_COLOR);
-        addColorChoices(clock);
+        addColorChoices(clock, "Clock color", ModuleSettings.CLOCK_COLOR,
+                ModuleSettings.CLOCK_CUSTOM_COLOR);
         addFormatField(clock);
 
         TextView note = text("Changes apply after SystemUI restarts.", 13, SECONDARY, false);
@@ -129,6 +143,7 @@ public final class SettingsActivity extends Activity {
         toggle.setChecked(checked);
         toggle.setThumbTintList(android.content.res.ColorStateList.valueOf(ACCENT));
         if (ModuleSettings.CLOCK_CUSTOM_COLOR.equals(key)) clockColorToggle = toggle;
+        if (ModuleSettings.BATTERY_CUSTOM_COLOR.equals(key)) batteryColorToggle = toggle;
         toggle.setOnCheckedChangeListener((button, value) -> settings.edit().putBoolean(key, value).apply());
         row.addView(toggle);
         parent.addView(row, params(-1, -2));
@@ -165,25 +180,26 @@ public final class SettingsActivity extends Activity {
         addDivider(parent);
     }
 
-    private void addColorChoices(LinearLayout parent) {
+    private void addColorChoices(LinearLayout parent, String labelText, String colorKey, String toggleKey) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(0, dp(13), 0, dp(13));
-        TextView label = text("Clock color", 15, PRIMARY, true);
+        TextView label = text(labelText, 15, PRIMARY, true);
         row.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
         int[] colors = {Color.WHITE, Color.BLACK, ACCENT, Color.rgb(67, 135, 255), Color.rgb(38, 166, 112)};
+        int selectedColor = settings.getInt(colorKey, Color.WHITE);
         for (int color : colors) {
             View swatch = new View(this);
-            swatch.setContentDescription("Clock color " + Integer.toHexString(color));
+            swatch.setContentDescription(labelText + " " + Integer.toHexString(color));
             swatch.setClickable(true);
             swatch.setFocusable(true);
             GradientDrawable dot = new GradientDrawable();
             dot.setShape(GradientDrawable.OVAL);
             dot.setColor(color);
-            dot.setStroke(dp(settings.getInt(ModuleSettings.CLOCK_COLOR, Color.WHITE) == color ? 3 : 1),
-                    settings.getInt(ModuleSettings.CLOCK_COLOR, Color.WHITE) == color ? ACCENT : Color.rgb(220, 222, 226));
+            dot.setStroke(dp(selectedColor == color ? 3 : 1),
+                    selectedColor == color ? ACCENT : Color.rgb(220, 222, 226));
             swatch.setBackground(dot);
-            swatch.setOnClickListener(view -> saveClockColor(color));
+            swatch.setOnClickListener(view -> saveColor(color, colorKey, toggleKey));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(24), dp(24));
             lp.leftMargin = dp(7);
             row.addView(swatch, lp);
@@ -194,23 +210,23 @@ public final class SettingsActivity extends Activity {
         hexButton.setPadding(0, dp(10), 0, dp(10));
         hexButton.setClickable(true);
         hexButton.setFocusable(true);
-        hexButton.setOnClickListener(view -> showHexColorDialog());
+        hexButton.setOnClickListener(view -> showHexColorDialog(labelText, colorKey, toggleKey));
         parent.addView(hexButton);
         addDivider(parent);
     }
 
-    private void showHexColorDialog() {
+    private void showHexColorDialog(String label, String colorKey, String toggleKey) {
         EditText input = new EditText(this);
         input.setSingleLine(true);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
         input.setHint("#RRGGBB or #AARRGGBB");
         input.setText(String.format(java.util.Locale.ROOT, "#%08X",
-                settings.getInt(ModuleSettings.CLOCK_COLOR, Color.WHITE)));
+                settings.getInt(colorKey, Color.WHITE)));
         input.setSelection(input.getText().length());
         input.setPadding(dp(20), dp(8), dp(20), dp(8));
 
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Clock color")
+                .setTitle(label)
                 .setView(input)
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Apply", null)
@@ -223,16 +239,17 @@ public final class SettingsActivity extends Activity {
                         input.setError("Enter 6 or 8 hexadecimal digits");
                         return;
                     }
-                    saveClockColor(Color.parseColor("#" + hex));
+                    saveColor(Color.parseColor("#" + hex), colorKey, toggleKey);
                     dialog.dismiss();
                 }));
         dialog.show();
     }
 
-    private void saveClockColor(int color) {
-        settings.edit().putInt(ModuleSettings.CLOCK_COLOR, color).putBoolean(
-                ModuleSettings.CLOCK_CUSTOM_COLOR, true).commit();
-        if (clockColorToggle != null) clockColorToggle.setChecked(true);
+    private void saveColor(int color, String colorKey, String toggleKey) {
+        settings.edit().putInt(colorKey, color).putBoolean(toggleKey, true).commit();
+        Switch toggle = ModuleSettings.BATTERY_CUSTOM_COLOR.equals(toggleKey)
+                ? batteryColorToggle : clockColorToggle;
+        if (toggle != null) toggle.setChecked(true);
     }
 
     private void addFormatField(LinearLayout parent) {
