@@ -115,6 +115,12 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
                                 syncDrawable(param.thisObject);
                             }
                         });
+                XposedHelpers.findAndHookMethod(batteryView, "updatePercentText", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        syncDrawable(param.thisObject);
+                    }
+                });
                 HOOKED_CLASSES.add(batteryView);
                 XposedBridge.log("CircularBattery: hooked " + BATTERY_VIEW);
             } catch (Throwable t) {
@@ -301,14 +307,36 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
             circular.setBatteryLevel(getIntField(view, "mLevel"));
             circular.setCharging(getBooleanField(view, "mPluggedIn"));
             circular.setPowerSave(getBooleanField(view, "mPowerSaveEnabled"));
-            int color = getIntField(view, "mTextColor");
-            circular.setColor(color == 0 ? Color.WHITE : color);
+            int color = getBatteryStateColor(view);
+            circular.setColor(color);
+            Object percentView = getField(view, "mBatteryPercentView");
+            if (percentView instanceof TextView) {
+                ((TextView) percentView).setTextColor(color);
+            }
             circular.setThickness(getIntSetting((View) view, ModuleSettings.BATTERY_THICKNESS, 15));
             circular.setShowCharging(getBooleanSetting((View) view, ModuleSettings.BATTERY_CHARGING, true));
             circular.setShowPowerSave(getBooleanSetting((View) view, ModuleSettings.BATTERY_POWER_SAVE, true));
             circular.invalidateSelf();
         } catch (Throwable t) {
             XposedBridge.log("CircularBattery: failed to sync drawable: " + t);
+        }
+    }
+
+    /** Reads ThemedBatteryDrawable.levelColor, which SystemUI calculates from battery state. */
+    private static int getBatteryStateColor(Object view) {
+        try {
+            Object accessorizedDrawable = getField(view, "mDrawable");
+            Object themedDrawable = XposedHelpers.callMethod(accessorizedDrawable, "getDrawable");
+            int stateColor = getIntField(themedDrawable, "levelColor");
+            if (Color.alpha(stateColor) != 0) return stateColor;
+        } catch (Throwable t) {
+            XposedBridge.log("CircularBattery: failed to read SystemUI battery state color: " + t);
+        }
+        try {
+            int textColor = getIntField(view, "mTextColor");
+            return textColor == 0 ? Color.WHITE : textColor;
+        } catch (Throwable ignored) {
+            return Color.WHITE;
         }
     }
 
