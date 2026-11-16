@@ -1,6 +1,7 @@
 package dev.rmx3834.circularbattery;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -15,6 +16,8 @@ import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.content.SharedPreferences;
+import android.text.InputType;
+import android.widget.EditText;
 
 public final class SettingsActivity extends Activity {
     private static final int BACKGROUND = Color.rgb(246, 247, 249);
@@ -23,6 +26,7 @@ public final class SettingsActivity extends Activity {
     private static final int PRIMARY = Color.rgb(28, 31, 36);
     private static final int SECONDARY = Color.rgb(119, 124, 132);
     private SharedPreferences settings;
+    private Switch clockColorToggle;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -124,6 +128,7 @@ public final class SettingsActivity extends Activity {
         Switch toggle = new Switch(this);
         toggle.setChecked(checked);
         toggle.setThumbTintList(android.content.res.ColorStateList.valueOf(ACCENT));
+        if (ModuleSettings.CLOCK_CUSTOM_COLOR.equals(key)) clockColorToggle = toggle;
         toggle.setOnCheckedChangeListener((button, value) -> settings.edit().putBoolean(key, value).apply());
         row.addView(toggle);
         parent.addView(row, params(-1, -2));
@@ -176,13 +181,56 @@ public final class SettingsActivity extends Activity {
             dot.setStroke(dp(settings.getInt(ModuleSettings.CLOCK_COLOR, Color.WHITE) == color ? 3 : 1),
                     settings.getInt(ModuleSettings.CLOCK_COLOR, Color.WHITE) == color ? ACCENT : Color.rgb(220, 222, 226));
             swatch.setBackground(dot);
-            swatch.setOnClickListener(view -> settings.edit().putInt(ModuleSettings.CLOCK_COLOR, color).apply());
+            swatch.setOnClickListener(view -> saveClockColor(color));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(24), dp(24));
             lp.leftMargin = dp(7);
             row.addView(swatch, lp);
         }
         parent.addView(row);
+        TextView hexButton = text("Choose color by hex…", 14, ACCENT, true);
+        hexButton.setGravity(Gravity.CENTER_VERTICAL);
+        hexButton.setPadding(0, dp(10), 0, dp(10));
+        hexButton.setClickable(true);
+        hexButton.setFocusable(true);
+        hexButton.setOnClickListener(view -> showHexColorDialog());
+        parent.addView(hexButton);
         addDivider(parent);
+    }
+
+    private void showHexColorDialog() {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        input.setHint("#RRGGBB or #AARRGGBB");
+        input.setText(String.format(java.util.Locale.ROOT, "#%08X",
+                settings.getInt(ModuleSettings.CLOCK_COLOR, Color.WHITE)));
+        input.setSelection(input.getText().length());
+        input.setPadding(dp(20), dp(8), dp(20), dp(8));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Clock color")
+                .setView(input)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Apply", null)
+                .create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(view -> {
+                    String hex = input.getText().toString().trim();
+                    if (hex.startsWith("#")) hex = hex.substring(1);
+                    if (!hex.matches("(?i)([0-9a-f]{6}|[0-9a-f]{8})")) {
+                        input.setError("Enter 6 or 8 hexadecimal digits");
+                        return;
+                    }
+                    saveClockColor(Color.parseColor("#" + hex));
+                    dialog.dismiss();
+                }));
+        dialog.show();
+    }
+
+    private void saveClockColor(int color) {
+        settings.edit().putInt(ModuleSettings.CLOCK_COLOR, color).putBoolean(
+                ModuleSettings.CLOCK_CUSTOM_COLOR, true).apply();
+        if (clockColorToggle != null) clockColorToggle.setChecked(true);
     }
 
     private void addFormatField(LinearLayout parent) {
