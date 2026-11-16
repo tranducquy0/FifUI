@@ -31,6 +31,7 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
     private static final String CLOCK = "com.android.systemui.statusbar.policy.Clock";
     private static volatile Bundle settings;
     private static volatile boolean settingsReadFailureLogged;
+    private static volatile boolean batterySyncLogged;
     private static volatile int lastAppliedClockColor = Integer.MIN_VALUE;
     private static final Set<Class<?>> HOOKED_CLASSES = Collections.newSetFromMap(new WeakHashMap<Class<?>, Boolean>());
 
@@ -234,7 +235,9 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
             clock.setTypeface(Typeface.create(family, weight >= 600 ? Typeface.BOLD : Typeface.NORMAL));
             applyClockColor(clock);
 
-            String format = settings.getString(ModuleSettings.CLOCK_FORMAT, "").trim();
+            Bundle currentSettings = settings;
+            String format = currentSettings == null ? ""
+                    : currentSettings.getString(ModuleSettings.CLOCK_FORMAT, "").trim();
             boolean use24Hour = getBooleanSetting(clock, ModuleSettings.CLOCK_24_HOUR, false);
             if (!format.isEmpty() || use24Hour) {
                 if (format.isEmpty()) {
@@ -285,7 +288,13 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
                 if (loaded == null) throw new IllegalStateException("settings provider returned no data");
                 settings = loaded;
                 settingsReadFailureLogged = false;
-                XposedBridge.log("CircularBattery: settings loaded; customClockColor="
+                XposedBridge.log("CircularBattery: settings loaded; batteryEnabled="
+                        + loaded.getBoolean(ModuleSettings.BATTERY_ENABLED, true)
+                        + ", batteryCustomColor="
+                        + loaded.getBoolean(ModuleSettings.BATTERY_CUSTOM_COLOR, false)
+                        + ", hasBatteryColor=" + loaded.containsKey(ModuleSettings.BATTERY_COLOR)
+                        + ", hasLowBatteryColor=" + loaded.containsKey(ModuleSettings.BATTERY_COLOR_LOW)
+                        + ", customClockColor="
                         + loaded.getBoolean(ModuleSettings.CLOCK_CUSTOM_COLOR, false)
                         + ", hasClockColor=" + loaded.containsKey(ModuleSettings.CLOCK_COLOR)
                         + ", batteryThickness=" + loaded.getInt(ModuleSettings.BATTERY_THICKNESS, 15));
@@ -347,6 +356,16 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
             circular.setShowCharging(getBooleanSetting((View) view, ModuleSettings.BATTERY_CHARGING, true));
             circular.setShowPowerSave(getBooleanSetting((View) view, ModuleSettings.BATTERY_POWER_SAVE, true));
             circular.invalidateSelf();
+            if (!batterySyncLogged && settings != null) {
+                XposedBridge.log("CircularBattery: battery drawable synced; customColor="
+                        + getBooleanSetting((View) view, ModuleSettings.BATTERY_CUSTOM_COLOR, false)
+                        + ", level=" + getIntField(view, "mLevel")
+                        + ", charging=" + getBooleanField(view, "mPluggedIn")
+                        + ", powerSave=" + getBooleanField(view, "mPowerSaveEnabled")
+                        + ", color=#" + String.format(Locale.ROOT, "%08X", color)
+                        + ", percentLabel=" + (percentView instanceof TextView));
+                batterySyncLogged = true;
+            }
         } catch (Throwable t) {
             XposedBridge.log("CircularBattery: failed to sync drawable: " + t);
         }
@@ -401,9 +420,17 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
     }
 
     private static Object getField(Object object, String name) throws ReflectiveOperationException {
-        Field field = object.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(object);
+        Class<?> currentClass = object.getClass();
+        while (currentClass != null) {
+            try {
+                Field field = currentClass.getDeclaredField(name);
+                field.setAccessible(true);
+                return field.get(object);
+            } catch (NoSuchFieldException ignored) {
+                currentClass = currentClass.getSuperclass();
+            }
+        }
+        throw new NoSuchFieldException(name);
     }
 
     private static int getIntField(Object object, String name) throws ReflectiveOperationException {

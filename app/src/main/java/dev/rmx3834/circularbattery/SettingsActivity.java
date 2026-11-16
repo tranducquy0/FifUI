@@ -64,6 +64,7 @@ public final class SettingsActivity extends Activity {
                 settings.getBoolean(ModuleSettings.BATTERY_CUSTOM_COLOR, false), ModuleSettings.BATTERY_CUSTOM_COLOR);
         addColorChoices(battery, "Battery color", ModuleSettings.BATTERY_COLOR,
                 ModuleSettings.BATTERY_CUSTOM_COLOR);
+        addGruvboxPreset(battery);
         addColorChoices(battery, "Normal state", ModuleSettings.BATTERY_COLOR_NORMAL,
                 ModuleSettings.BATTERY_CUSTOM_COLOR);
         addColorChoices(battery, "Low battery state", ModuleSettings.BATTERY_COLOR_LOW,
@@ -212,6 +213,27 @@ public final class SettingsActivity extends Activity {
         hexButton.setFocusable(true);
         hexButton.setOnClickListener(view -> showHexColorDialog(labelText, colorKey, toggleKey));
         parent.addView(hexButton);
+        addDivider(parent);
+    }
+
+    private void addGruvboxPreset(LinearLayout parent) {
+        TextView preset = text("Apply Gruvbox battery colors", 14, ACCENT, true);
+        preset.setGravity(Gravity.CENTER_VERTICAL);
+        preset.setPadding(0, dp(12), 0, dp(12));
+        preset.setClickable(true);
+        preset.setFocusable(true);
+        preset.setOnClickListener(view -> {
+            settings.edit()
+                    .putBoolean(ModuleSettings.BATTERY_CUSTOM_COLOR, true)
+                    .putInt(ModuleSettings.BATTERY_COLOR, 0xFFD79921)
+                    .putInt(ModuleSettings.BATTERY_COLOR_NORMAL, 0xFFD79921)
+                    .putInt(ModuleSettings.BATTERY_COLOR_LOW, 0xFFCC241D)
+                    .putInt(ModuleSettings.BATTERY_COLOR_CHARGING, 0xFF98971A)
+                    .putInt(ModuleSettings.BATTERY_COLOR_POWER_SAVE, 0xFFD65D0E)
+                    .commit();
+            if (batteryColorToggle != null) batteryColorToggle.setChecked(true);
+        });
+        parent.addView(preset);
         addDivider(parent);
     }
 
