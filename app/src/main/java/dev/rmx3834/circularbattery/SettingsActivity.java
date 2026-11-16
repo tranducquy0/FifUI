@@ -154,7 +154,9 @@ public final class SettingsActivity extends Activity {
                 if (fromUser) settings.edit().putInt(key, progress + min).apply();
             }
             @Override public void onStartTrackingTouch(SeekBar bar) {}
-            @Override public void onStopTrackingTouch(SeekBar bar) {}
+            @Override public void onStopTrackingTouch(SeekBar bar) {
+                settings.edit().putInt(key, bar.getProgress() + min).commit();
+            }
         });
         LinearLayout.LayoutParams seekParams = params(-1, -2);
         seekParams.topMargin = dp(4);
@@ -229,7 +231,7 @@ public final class SettingsActivity extends Activity {
 
     private void saveClockColor(int color) {
         settings.edit().putInt(ModuleSettings.CLOCK_COLOR, color).putBoolean(
-                ModuleSettings.CLOCK_CUSTOM_COLOR, true).apply();
+                ModuleSettings.CLOCK_CUSTOM_COLOR, true).commit();
         if (clockColorToggle != null) clockColorToggle.setChecked(true);
     }
 

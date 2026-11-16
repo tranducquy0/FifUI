@@ -11,8 +11,11 @@ import android.widget.TextView;
 
 import java.text.SimpleDateFormat;
 import java.lang.reflect.Field;
+import java.util.Collections;
 import java.util.Date;
 import java.util.Locale;
+import java.util.Set;
+import java.util.WeakHashMap;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -23,7 +26,11 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public final class CircularBatteryHook implements IXposedHookLoadPackage {
     private static final String SYSTEM_UI = "com.android.systemui";
     private static final String BATTERY_VIEW = "com.android.systemui.battery.BatteryMeterView";
+    private static final String CLOCK = "com.android.systemui.statusbar.policy.Clock";
     private static volatile Bundle settings;
+    private static volatile boolean settingsReadFailureLogged;
+    private static volatile int lastAppliedClockColor = Integer.MIN_VALUE;
+    private static final Set<Class<?>> HOOKED_CLASSES = Collections.newSetFromMap(new WeakHashMap<Class<?>, Boolean>());
 
     @Override
     public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) {
@@ -31,88 +38,146 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
             return;
         }
 
-        try {
-            Class<?> batteryView = XposedHelpers.findClass(BATTERY_VIEW, lpparam.classLoader);
-            XposedHelpers.findAndHookConstructor(batteryView, android.content.Context.class,
-                    android.util.AttributeSet.class, new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            installDrawable(param.thisObject);
-                        }
-                    });
-            XposedHelpers.findAndHookMethod(batteryView, "onBatteryLevelChanged", int.class,
-                    boolean.class, new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            syncDrawable(param.thisObject);
-                        }
-                    });
-            XposedHelpers.findAndHookMethod(batteryView, "onBatteryUnknownStateChanged", boolean.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            installDrawable(param.thisObject);
-                        }
-                    });
-            XposedHelpers.findAndHookMethod(batteryView, "updateColors", int.class, int.class,
-                    int.class, new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            syncDrawable(param.thisObject);
-                        }
-                    });
-        } catch (Throwable t) {
-            XposedBridge.log("CircularBattery: failed to hook BatteryMeterView: " + t);
-        }
-
-        hookClock(lpparam);
+        hookDeferredClassLookup();
+        hookClassIfAvailable(BATTERY_VIEW, lpparam.classLoader);
+        hookClassIfAvailable(CLOCK, lpparam.classLoader);
     }
 
-    private static void hookClock(XC_LoadPackage.LoadPackageParam lpparam) {
+    private static void hookDeferredClassLookup() {
         try {
-            Class<?> clockClass = XposedHelpers.findClass(
-                    "com.android.systemui.statusbar.policy.Clock", lpparam.classLoader);
-            XposedHelpers.findAndHookMethod(clockClass, "updateClock", new XC_MethodHook() {
-                @Override protected void afterHookedMethod(MethodHookParam param) {
-                    applyClockSettings(param.thisObject);
-                }
-            });
-            XposedHelpers.findAndHookMethod(clockClass, "updateClockVisibility", new XC_MethodHook() {
-                @Override protected void afterHookedMethod(MethodHookParam param) {
-                    if (isStatusBarClock(param.thisObject)
-                            && !getBooleanSetting((View) param.thisObject, ModuleSettings.CLOCK_VISIBLE, true)) {
-                        ((View) param.thisObject).setVisibility(View.GONE);
-                    }
-                }
-            });
-            XposedHelpers.findAndHookMethod(clockClass, "updateShowSeconds", new XC_MethodHook() {
-                @Override protected void beforeHookedMethod(MethodHookParam param) {
-                    if (isStatusBarClock(param.thisObject)) setSecondsPreference(param.thisObject);
-                }
-            });
-            XposedHelpers.findAndHookMethod(clockClass, "onTuningChanged", String.class, String.class,
+            XposedHelpers.findAndHookMethod(ClassLoader.class, "loadClass", String.class,
                     new XC_MethodHook() {
-                        @Override protected void afterHookedMethod(MethodHookParam param) {
-                            if (isStatusBarClock(param.thisObject) && "clock_seconds".equals(param.args[0])) {
-                                setSecondsPreference(param.thisObject);
-                            }
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            onSystemUiClassLoaded((String) param.args[0], param.getResult());
                         }
                     });
-            XposedHelpers.findAndHookMethod(clockClass, "onDarkChanged", java.util.ArrayList.class,
-                    float.class, int.class, new XC_MethodHook() {
-                        @Override protected void afterHookedMethod(MethodHookParam param) {
-                            if (isStatusBarClock(param.thisObject)) applyClockColor((TextView) param.thisObject);
-                        }
-                    });
+            XposedHelpers.findAndHookMethod(ClassLoader.class, "loadClass", String.class,
+                    boolean.class, new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    onSystemUiClassLoaded((String) param.args[0], param.getResult());
+                }
+            });
         } catch (Throwable t) {
-            XposedBridge.log("CircularBattery: failed to hook status-bar Clock: " + t);
+            XposedBridge.log("CircularBattery: failed to watch SystemUI class loading: " + t);
+        }
+    }
+
+    private static void onSystemUiClassLoaded(String name, Object result) {
+        if (!(result instanceof Class<?>) || !(BATTERY_VIEW.equals(name) || CLOCK.equals(name))) return;
+        Class<?> loadedClass = (Class<?>) result;
+        if (BATTERY_VIEW.equals(name)) hookBatteryClass(loadedClass);
+        else hookClockClass(loadedClass);
+    }
+
+    private static void hookClassIfAvailable(String name, ClassLoader classLoader) {
+        try {
+            Class<?> loadedClass = XposedHelpers.findClassIfExists(name, classLoader);
+            if (loadedClass != null) {
+                if (BATTERY_VIEW.equals(name)) hookBatteryClass(loadedClass);
+                else hookClockClass(loadedClass);
+            }
+        } catch (Throwable t) {
+            XposedBridge.log("CircularBattery: initial lookup failed for " + name + ": " + t);
+        }
+    }
+
+    private static void hookBatteryClass(Class<?> batteryView) {
+        synchronized (HOOKED_CLASSES) {
+            if (HOOKED_CLASSES.contains(batteryView)) return;
+            try {
+                XposedHelpers.findAndHookConstructor(batteryView, android.content.Context.class,
+                        android.util.AttributeSet.class, new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                installDrawable(param.thisObject);
+                            }
+                        });
+                XposedHelpers.findAndHookMethod(batteryView, "onBatteryLevelChanged", int.class,
+                        boolean.class, new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                syncDrawable(param.thisObject);
+                            }
+                        });
+                XposedHelpers.findAndHookMethod(batteryView, "onBatteryUnknownStateChanged", boolean.class,
+                        new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                installDrawable(param.thisObject);
+                            }
+                        });
+                XposedHelpers.findAndHookMethod(batteryView, "updateColors", int.class, int.class,
+                        int.class, new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                syncDrawable(param.thisObject);
+                            }
+                        });
+                HOOKED_CLASSES.add(batteryView);
+                XposedBridge.log("CircularBattery: hooked " + BATTERY_VIEW);
+            } catch (Throwable t) {
+                XposedBridge.log("CircularBattery: failed to hook BatteryMeterView: " + t);
+            }
+        }
+    }
+
+    private static void hookClockClass(Class<?> clockClass) {
+        synchronized (HOOKED_CLASSES) {
+            if (HOOKED_CLASSES.contains(clockClass)) return;
+            int successfulHooks = 0;
+            try {
+                XposedHelpers.findAndHookMethod(clockClass, "updateClock", new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam param) {
+                        applyClockSettings(param.thisObject);
+                    }
+                });
+                successfulHooks++;
+                XposedHelpers.findAndHookMethod(clockClass, "updateClockVisibility", new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam param) {
+                        if (isStatusBarClock(param.thisObject)
+                                && !getBooleanSetting((View) param.thisObject, ModuleSettings.CLOCK_VISIBLE, true)) {
+                            ((View) param.thisObject).setVisibility(View.GONE);
+                        }
+                    }
+                });
+                successfulHooks++;
+                XposedHelpers.findAndHookMethod(clockClass, "updateShowSeconds", new XC_MethodHook() {
+                    @Override protected void beforeHookedMethod(MethodHookParam param) {
+                        setSecondsPreference(param.thisObject);
+                    }
+                });
+                successfulHooks++;
+                XposedHelpers.findAndHookMethod(clockClass, "onTuningChanged", String.class, String.class,
+                        new XC_MethodHook() {
+                            @Override protected void afterHookedMethod(MethodHookParam param) {
+                                if ("clock_seconds".equals(param.args[0])) setSecondsPreference(param.thisObject);
+                            }
+                        });
+                successfulHooks++;
+                XposedHelpers.findAndHookMethod(clockClass, "onDarkChanged", java.util.ArrayList.class,
+                        float.class, int.class, new XC_MethodHook() {
+                            @Override protected void afterHookedMethod(MethodHookParam param) {
+                                if (isStatusBarClock(param.thisObject)) applyClockColor((TextView) param.thisObject);
+                            }
+                        });
+                successfulHooks++;
+                HOOKED_CLASSES.add(clockClass);
+                XposedBridge.log("CircularBattery: hooked " + CLOCK);
+            } catch (Throwable t) {
+                if (successfulHooks == 0) HOOKED_CLASSES.remove(clockClass);
+                XposedBridge.log("CircularBattery: failed to hook status-bar Clock after "
+                        + successfulHooks + " methods: " + t);
+            }
         }
     }
 
     private static void setSecondsPreference(Object clock) {
         View view = (View) clock;
         loadSettings(view);
-        if (!settings.containsKey(ModuleSettings.CLOCK_SECONDS)) return;
+        Bundle currentSettings = settings;
+        if (currentSettings == null || !currentSettings.containsKey(ModuleSettings.CLOCK_SECONDS)) return;
         try {
             XposedHelpers.setBooleanField(clock, "mShowSeconds",
                     getBooleanSetting(view, ModuleSettings.CLOCK_SECONDS, false));
@@ -152,18 +217,26 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
 
     private static void applyClockColor(TextView clock) {
         if (getBooleanSetting(clock, ModuleSettings.CLOCK_CUSTOM_COLOR, false)) {
-            clock.setTextColor(getIntSetting(clock, ModuleSettings.CLOCK_COLOR, Color.WHITE));
+            int color = getIntSetting(clock, ModuleSettings.CLOCK_COLOR, Color.WHITE);
+            clock.setTextColor(color);
+            if (lastAppliedClockColor != color) {
+                XposedBridge.log("CircularBattery: applied fixed clock color #"
+                        + String.format(Locale.ROOT, "%08X", color));
+                lastAppliedClockColor = color;
+            }
         }
     }
 
     private static boolean getBooleanSetting(View view, String key, boolean defaultValue) {
         loadSettings(view);
-        return settings.getBoolean(key, defaultValue);
+        Bundle currentSettings = settings;
+        return currentSettings == null ? defaultValue : currentSettings.getBoolean(key, defaultValue);
     }
 
     private static int getIntSetting(View view, String key, int defaultValue) {
         loadSettings(view);
-        return settings.getInt(key, defaultValue);
+        Bundle currentSettings = settings;
+        return currentSettings == null ? defaultValue : currentSettings.getInt(key, defaultValue);
     }
 
     private static void loadSettings(View view) {
@@ -175,9 +248,16 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
                         Uri.parse("content://" + ModuleSettings.AUTHORITY), "read", null, null);
                 if (loaded == null) throw new IllegalStateException("settings provider returned no data");
                 settings = loaded;
+                settingsReadFailureLogged = false;
+                XposedBridge.log("CircularBattery: settings loaded; customClockColor="
+                        + loaded.getBoolean(ModuleSettings.CLOCK_CUSTOM_COLOR, false)
+                        + ", hasClockColor=" + loaded.containsKey(ModuleSettings.CLOCK_COLOR)
+                        + ", batteryThickness=" + loaded.getInt(ModuleSettings.BATTERY_THICKNESS, 15));
             } catch (Throwable t) {
-                XposedBridge.log("CircularBattery: failed to read settings: " + t);
-                settings = Bundle.EMPTY;
+                if (!settingsReadFailureLogged) {
+                    XposedBridge.log("CircularBattery: failed to read settings; will retry: " + t);
+                    settingsReadFailureLogged = true;
+                }
             }
         }
     }

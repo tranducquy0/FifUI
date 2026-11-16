@@ -41,6 +41,7 @@ public final class CircularBatteryDrawable extends Drawable {
 
     public void setThickness(int percent) {
         thickness = Math.max(5, Math.min(30, percent)) / 100f;
+        invalidateSelf();
     }
 
     public void setShowCharging(boolean showCharging) {
@@ -56,7 +57,7 @@ public final class CircularBatteryDrawable extends Drawable {
         float inset = Math.max(1f, Math.min(getBounds().width(), getBounds().height()) * 0.12f);
         arc.set(getBounds().left + inset, getBounds().top + inset,
                 getBounds().right - inset, getBounds().bottom - inset);
-        paint.setStrokeWidth(Math.max(2f, arc.width() * thickness));
+        paint.setStrokeWidth(Math.max(0.75f, arc.width() * thickness));
         paint.setColor(color);
         paint.setAlpha(80);
         canvas.drawArc(arc, -90f, 360f, false, paint);
