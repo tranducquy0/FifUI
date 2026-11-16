@@ -70,7 +70,7 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
         hookClock(lpparam);
     }
 
-    private static void hookClock(LoadPackageParam lpparam) {
+    private static void hookClock(XC_LoadPackage.LoadPackageParam lpparam) {
         try {
             Class<?> clockClass = XposedHelpers.findClass(
                     "com.android.systemui.statusbar.policy.Clock", lpparam.classLoader);
