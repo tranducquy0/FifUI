@@ -12,16 +12,21 @@ import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
+import de.robv.android.xposed.XSharedPreferences;
 
 public final class CircularBatteryHook implements IXposedHookLoadPackage {
     private static final String SYSTEM_UI = "com.android.systemui";
     private static final String BATTERY_VIEW = "com.android.systemui.battery.BatteryMeterView";
+    private static XSharedPreferences settings;
 
     @Override
     public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) {
         if (!SYSTEM_UI.equals(lpparam.packageName)) {
             return;
         }
+
+        settings = new XSharedPreferences("dev.rmx3834.circularbattery", ModuleSettings.FILE);
+        settings.reload();
 
         try {
             Class<?> batteryView = XposedHelpers.findClass(BATTERY_VIEW, lpparam.classLoader);
@@ -60,6 +65,9 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
 
     private static void installDrawable(Object view) {
         try {
+            if (!settings.getBoolean(ModuleSettings.BATTERY_ENABLED, true)) {
+                return;
+            }
             ImageView icon = (ImageView) getField(view, "mBatteryIconView");
             if (!(icon.getDrawable() instanceof CircularBatteryDrawable)) {
                 icon.setImageDrawable(new CircularBatteryDrawable());
@@ -83,6 +91,9 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
             circular.setPowerSave(getBooleanField(view, "mPowerSaveEnabled"));
             int color = getIntField(view, "mTextColor");
             circular.setColor(color == 0 ? Color.WHITE : color);
+            circular.setThickness(settings.getInt(ModuleSettings.BATTERY_THICKNESS, 15));
+            circular.setShowCharging(settings.getBoolean(ModuleSettings.BATTERY_CHARGING, true));
+            circular.setShowPowerSave(settings.getBoolean(ModuleSettings.BATTERY_POWER_SAVE, true));
             circular.invalidateSelf();
         } catch (Throwable t) {
             XposedBridge.log("CircularBattery: failed to sync drawable: " + t);

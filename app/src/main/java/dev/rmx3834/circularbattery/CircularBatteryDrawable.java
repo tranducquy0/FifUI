@@ -11,8 +11,11 @@ public final class CircularBatteryDrawable extends Drawable {
     private final RectF arc = new RectF();
     private int level;
     private int color;
+    private float thickness = 0.15f;
     private boolean charging;
     private boolean powerSave;
+    private boolean showCharging = true;
+    private boolean showPowerSave = true;
 
     public CircularBatteryDrawable() {
         paint.setStyle(Paint.Style.STROKE);
@@ -36,22 +39,34 @@ public final class CircularBatteryDrawable extends Drawable {
         this.powerSave = powerSave;
     }
 
+    public void setThickness(int percent) {
+        thickness = Math.max(5, Math.min(30, percent)) / 100f;
+    }
+
+    public void setShowCharging(boolean showCharging) {
+        this.showCharging = showCharging;
+    }
+
+    public void setShowPowerSave(boolean showPowerSave) {
+        this.showPowerSave = showPowerSave;
+    }
+
     @Override
     public void draw(Canvas canvas) {
         float inset = Math.max(1f, Math.min(getBounds().width(), getBounds().height()) * 0.12f);
         arc.set(getBounds().left + inset, getBounds().top + inset,
                 getBounds().right - inset, getBounds().bottom - inset);
-        paint.setStrokeWidth(Math.max(2f, arc.width() * 0.15f));
+        paint.setStrokeWidth(Math.max(2f, arc.width() * thickness));
         paint.setColor(color);
         paint.setAlpha(80);
         canvas.drawArc(arc, -90f, 360f, false, paint);
         paint.setAlpha(255);
         canvas.drawArc(arc, -90f, 360f * level / 100f, false, paint);
-        if (charging) {
+        if (charging && showCharging) {
             paint.setStyle(Paint.Style.FILL);
             canvas.drawCircle(arc.centerX(), arc.centerY(), paint.getStrokeWidth() * 0.7f, paint);
             paint.setStyle(Paint.Style.STROKE);
-        } else if (powerSave) {
+        } else if (powerSave && showPowerSave) {
             paint.setStrokeWidth(Math.max(2f, arc.width() * 0.1f));
             canvas.drawLine(arc.centerX() - arc.width() * 0.18f, arc.centerY(),
                     arc.centerX() + arc.width() * 0.18f, arc.centerY(), paint);
