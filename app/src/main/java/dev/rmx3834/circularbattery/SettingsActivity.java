@@ -12,6 +12,7 @@ import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
+import android.content.SharedPreferences;
 
 public final class SettingsActivity extends Activity {
     private static final int BACKGROUND = Color.rgb(246, 247, 249);
@@ -19,10 +20,12 @@ public final class SettingsActivity extends Activity {
     private static final int ACCENT = Color.rgb(255, 89, 69);
     private static final int PRIMARY = Color.rgb(28, 31, 36);
     private static final int SECONDARY = Color.rgb(119, 124, 132);
+    private SharedPreferences settings;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        settings = getSharedPreferences(ModuleSettings.FILE, MODE_PRIVATE);
         getWindow().setStatusBarColor(BACKGROUND);
         getWindow().setNavigationBarColor(BACKGROUND);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
@@ -46,10 +49,14 @@ public final class SettingsActivity extends Activity {
 
         addSection(page, "BATTERY");
         LinearLayout battery = card(page);
-        addSwitch(battery, "Circular battery", "Replace the stock status-bar battery icon", true);
-        addSlider(battery, "Ring thickness", "Adjust the battery ring weight", 15, 5, 30);
-        addSwitch(battery, "Charging indicator", "Show a center dot while charging", true);
-        addSwitch(battery, "Power saver indicator", "Show a center line in power saver", true);
+        addSwitch(battery, "Circular battery", "Replace the stock status-bar battery icon",
+                settings.getBoolean(ModuleSettings.BATTERY_ENABLED, true), ModuleSettings.BATTERY_ENABLED);
+        addSlider(battery, "Ring thickness", "Adjust the battery ring weight",
+                settings.getInt(ModuleSettings.BATTERY_THICKNESS, 15), 5, 30, ModuleSettings.BATTERY_THICKNESS);
+        addSwitch(battery, "Charging indicator", "Show a center dot while charging",
+                settings.getBoolean(ModuleSettings.BATTERY_CHARGING, true), ModuleSettings.BATTERY_CHARGING);
+        addSwitch(battery, "Power saver indicator", "Show a center line in power saver",
+                settings.getBoolean(ModuleSettings.BATTERY_POWER_SAVE, true), ModuleSettings.BATTERY_POWER_SAVE);
 
         addSection(page, "STATUS BAR CLOCK");
         LinearLayout clock = card(page);
@@ -93,7 +100,7 @@ public final class SettingsActivity extends Activity {
         return card;
     }
 
-    private void addSwitch(LinearLayout parent, String label, String detail, boolean checked) {
+    private void addSwitch(LinearLayout parent, String label, String detail, boolean checked, String key) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(0, dp(13), 0, dp(13));
@@ -109,12 +116,13 @@ public final class SettingsActivity extends Activity {
         Switch toggle = new Switch(this);
         toggle.setChecked(checked);
         toggle.setThumbTintList(android.content.res.ColorStateList.valueOf(ACCENT));
+        toggle.setOnCheckedChangeListener((button, value) -> settings.edit().putBoolean(key, value).apply());
         row.addView(toggle);
         parent.addView(row, params(-1, -2));
         addDivider(parent);
     }
 
-    private void addSlider(LinearLayout parent, String label, String detail, int value, int min, int max) {
+    private void addSlider(LinearLayout parent, String label, String detail, int value, int min, int max, String key) {
         LinearLayout block = new LinearLayout(this);
         block.setOrientation(LinearLayout.VERTICAL);
         block.setPadding(0, dp(13), 0, dp(13));
@@ -128,6 +136,13 @@ public final class SettingsActivity extends Activity {
         seek.setProgress(value - min);
         seek.setProgressTintList(android.content.res.ColorStateList.valueOf(ACCENT));
         seek.setThumbTintList(android.content.res.ColorStateList.valueOf(ACCENT));
+        seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                if (fromUser) settings.edit().putInt(key, progress + min).apply();
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) {}
+            @Override public void onStopTrackingTouch(SeekBar bar) {}
+        });
         LinearLayout.LayoutParams seekParams = params(-1, -2);
         seekParams.topMargin = dp(4);
         block.addView(seek, seekParams);
