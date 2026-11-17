@@ -3,8 +3,11 @@ package dev.rmx3834.circularbattery;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.graphics.Typeface;
+import android.database.ContentObserver;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -34,6 +37,8 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
     private static volatile boolean batterySyncLogged;
     private static volatile int lastAppliedClockColor = Integer.MIN_VALUE;
     private static final Set<Class<?>> HOOKED_CLASSES = Collections.newSetFromMap(new WeakHashMap<Class<?>, Boolean>());
+    private static final Set<View> SETTINGS_VIEWS = Collections.newSetFromMap(new WeakHashMap<View, Boolean>());
+    private static ContentResolverSettingsObserver settingsObserver;
 
     @Override
     public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) {
@@ -279,6 +284,7 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
     }
 
     private static void loadSettings(View view) {
+        registerSettingsObserver(view);
         if (settings != null) return;
         synchronized (CircularBatteryHook.class) {
             if (settings != null) return;
@@ -302,6 +308,45 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
                 if (!settingsReadFailureLogged) {
                     XposedBridge.log("CircularBattery: failed to read settings; will retry: " + t);
                     settingsReadFailureLogged = true;
+                }
+            }
+        }
+    }
+
+    private static void registerSettingsObserver(View view) {
+        synchronized (CircularBatteryHook.class) {
+            SETTINGS_VIEWS.add(view);
+            if (settingsObserver != null) return;
+            settingsObserver = new ContentResolverSettingsObserver();
+            view.getContext().getContentResolver().registerContentObserver(
+                    Uri.parse("content://" + ModuleSettings.AUTHORITY), false, settingsObserver);
+        }
+    }
+
+    private static final class ContentResolverSettingsObserver extends ContentObserver {
+        ContentResolverSettingsObserver() {
+            super(new Handler(Looper.getMainLooper()));
+        }
+
+        @Override
+        public void onChange(boolean selfChange, Uri uri) {
+            settings = null;
+            synchronized (CircularBatteryHook.class) {
+                for (View view : SETTINGS_VIEWS) {
+                    if (view == null) continue;
+                    loadSettings(view);
+                    if (view.getClass().getName().equals(BATTERY_VIEW)) {
+                        syncDrawable(view);
+                    } else if (view instanceof TextView && CLOCK.equals(view.getClass().getName())) {
+                        Object clock = view;
+                        applyClockSettings(clock);
+                        setSecondsPreference(clock);
+                        if (!getBooleanSetting(view, ModuleSettings.CLOCK_VISIBLE, true)) {
+                            view.setVisibility(View.GONE);
+                        } else {
+                            XposedHelpers.callMethod(clock, "updateClockVisibility");
+                        }
+                    }
                 }
             }
         }

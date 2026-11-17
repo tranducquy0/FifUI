@@ -2,6 +2,7 @@ package dev.rmx3834.circularbattery;
 
 import android.content.ContentProvider;
 import android.content.ContentValues;
+import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
@@ -9,8 +10,16 @@ import android.os.Bundle;
 import java.util.Map;
 
 public final class SettingsProvider extends ContentProvider {
+    private SharedPreferences.OnSharedPreferenceChangeListener settingsListener;
+
     @Override
     public boolean onCreate() {
+        if (getContext() != null) {
+            settingsListener = (preferences, key) -> getContext().getContentResolver().notifyChange(
+                    Uri.parse("content://" + ModuleSettings.AUTHORITY), null);
+            getContext().getSharedPreferences(ModuleSettings.FILE, 0)
+                    .registerOnSharedPreferenceChangeListener(settingsListener);
+        }
         return true;
     }
 
