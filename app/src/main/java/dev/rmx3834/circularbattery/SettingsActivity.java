@@ -16,10 +16,21 @@ import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.content.SharedPreferences;
+import android.content.Intent;
+import android.net.Uri;
 import android.text.InputType;
 import android.widget.EditText;
+import android.widget.Toast;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 public final class SettingsActivity extends Activity {
+    private static final int REQUEST_IMPORT_CONFIG = 1;
+    private static final int REQUEST_EXPORT_CONFIG = 2;
     private static final int BACKGROUND = Color.rgb(246, 247, 249);
     private static final int SURFACE = Color.WHITE;
     private static final int ACCENT = Color.rgb(255, 89, 69);
@@ -53,6 +64,11 @@ public final class SettingsActivity extends Activity {
         subtitleParams.topMargin = dp(5);
         subtitleParams.bottomMargin = dp(25);
         page.addView(subtitle, subtitleParams);
+
+        addSection(page, "PORTABLE CONFIG");
+        LinearLayout config = card(page);
+        addAction(config, "Import config", "Load a .conf file", this::importConfig);
+        addAction(config, "Export config", "Save settings as a portable .conf file", this::exportConfig);
 
         addSection(page, "BATTERY");
         LinearLayout battery = card(page);
@@ -96,12 +112,186 @@ public final class SettingsActivity extends Activity {
                 ModuleSettings.CLOCK_CUSTOM_COLOR);
         addFormatField(clock);
 
-        TextView note = text("Changes apply after SystemUI restarts.", 13, SECONDARY, false);
+        TextView note = text("Settings apply live in SystemUI.", 13, SECONDARY, false);
         note.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams noteParams = params(-1, -2);
         noteParams.topMargin = dp(20);
         page.addView(note, noteParams);
         setContentView(scroll);
+    }
+
+    private void addAction(LinearLayout parent, String title, String detail, Runnable action) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(13), 0, dp(13));
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.addView(text(title, 15, PRIMARY, true));
+        TextView description = text(detail, 12, SECONDARY, false);
+        LinearLayout.LayoutParams detailParams = params(-1, -2);
+        detailParams.topMargin = dp(4);
+        copy.addView(description, detailParams);
+        row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView button = text("Open", 14, ACCENT, true);
+        button.setClickable(true);
+        button.setFocusable(true);
+        button.setOnClickListener(view -> action.run());
+        row.addView(button);
+        parent.addView(row, params(-1, -2));
+        addDivider(parent);
+    }
+
+    private void importConfig() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.setType("text/plain");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        startActivityForResult(intent, REQUEST_IMPORT_CONFIG);
+    }
+
+    private void exportConfig() {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.setType("text/plain");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.putExtra(Intent.EXTRA_TITLE, "fifui.conf");
+        startActivityForResult(intent, REQUEST_EXPORT_CONFIG);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        try {
+            if (requestCode == REQUEST_IMPORT_CONFIG) {
+                importConfig(data.getData());
+                recreate();
+                Toast.makeText(this, "Config imported", Toast.LENGTH_SHORT).show();
+            } else if (requestCode == REQUEST_EXPORT_CONFIG) {
+                exportConfig(data.getData());
+                Toast.makeText(this, "Config exported", Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, "Config error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void importConfig(Uri uri) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (java.io.InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input == null) throw new IOException("could not open config file");
+            byte[] buffer = new byte[4096];
+            int count;
+            while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+        }
+        Map<String, String> values = PortableConfig.parse(output.toString(StandardCharsets.UTF_8.name()));
+        SharedPreferences.Editor editor = settings.edit();
+        applyConfig(values, editor);
+        if (!editor.commit()) throw new IOException("could not save imported settings");
+    }
+
+    private void applyConfig(Map<String, String> values, SharedPreferences.Editor editor) {
+        for (Map.Entry<String, String> entry : values.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            switch (key) {
+                case "battery.style":
+                    if (!value.equals("circular") && !value.equals("default")) throw invalid(key, value);
+                    editor.putBoolean(ModuleSettings.BATTERY_ENABLED, value.equals("circular"));
+                    break;
+                case "battery.thickness":
+                    int thickness = parseInt(key, value);
+                    if (thickness < 5 || thickness > 30) throw invalid(key, value);
+                    editor.putInt(ModuleSettings.BATTERY_THICKNESS, thickness);
+                    break;
+                case "battery.charging": editor.putInt(ModuleSettings.BATTERY_COLOR_CHARGING, parseColor(key, value)); break;
+                case "battery.unpluged":
+                case "battery.unplugged":
+                case "battery.normal": editor.putInt(ModuleSettings.BATTERY_COLOR_NORMAL, parseColor(key, value)); break;
+                case "battery.power_saving": editor.putInt(ModuleSettings.BATTERY_COLOR_POWER_SAVE, parseColor(key, value)); break;
+                case "battery.low_power": editor.putInt(ModuleSettings.BATTERY_COLOR_LOW, parseColor(key, value)); break;
+                case "clock.style":
+                    if (!value.equals("system_default")) {
+                        try { new java.text.SimpleDateFormat(value, java.util.Locale.ROOT); }
+                        catch (IllegalArgumentException e) { throw invalid(key, value); }
+                    }
+                    editor.putString(ModuleSettings.CLOCK_FORMAT, value.equals("system_default") ? "" : value);
+                    editor.putBoolean(ModuleSettings.CLOCK_24_HOUR,
+                            !value.equals("system_default") && (value.contains("H") || value.contains("k")));
+                    editor.putBoolean(ModuleSettings.CLOCK_SECONDS,
+                            !value.equals("system_default") && value.contains("s"));
+                    break;
+                case "clock.color":
+                    editor.putInt(ModuleSettings.CLOCK_COLOR, parseColor(key, value));
+                    editor.putBoolean(ModuleSettings.CLOCK_CUSTOM_COLOR, true);
+                    break;
+                default: throw new IllegalArgumentException("Unknown config key: " + key);
+            }
+        }
+        if (values.keySet().stream().anyMatch(key -> key.startsWith("battery.")
+                && !key.equals("battery.style") && !key.equals("battery.thickness"))) {
+            editor.putBoolean(ModuleSettings.BATTERY_CUSTOM_COLOR, true);
+        }
+    }
+
+    private int parseInt(String key, String value) {
+        try { return Integer.parseInt(value); }
+        catch (NumberFormatException e) { throw invalid(key, value); }
+    }
+
+    private int parseColor(String key, String value) {
+        try {
+            if (!value.matches("(?i)#(?:[0-9a-f]{6}|[0-9a-f]{8})")) throw invalid(key, value);
+            return Color.parseColor(value);
+        } catch (IllegalArgumentException e) { throw invalid(key, value); }
+    }
+
+    private IllegalArgumentException invalid(String key, String value) {
+        return new IllegalArgumentException("invalid value for " + key + ": " + value);
+    }
+
+    private void exportConfig(Uri uri) throws IOException {
+        String config = createConfig();
+        try (java.io.OutputStream output = getContentResolver().openOutputStream(uri)) {
+            if (output == null) throw new IOException("could not create config file");
+            output.write(config.getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    private String createConfig() {
+        Map<String, String> values = new LinkedHashMap<>();
+        values.put("battery.style", settings.getBoolean(ModuleSettings.BATTERY_ENABLED, true) ? "circular" : "default");
+        values.put("battery.thickness", Integer.toString(settings.getInt(ModuleSettings.BATTERY_THICKNESS, 15)));
+        values.put("battery.charging", colorString(ModuleSettings.BATTERY_COLOR_CHARGING));
+        values.put("battery.unpluged", colorString(ModuleSettings.BATTERY_COLOR_NORMAL));
+        values.put("battery.power_saving", colorString(ModuleSettings.BATTERY_COLOR_POWER_SAVE));
+        values.put("battery.low_power", colorString(ModuleSettings.BATTERY_COLOR_LOW));
+        String clockStyle = settings.getString(ModuleSettings.CLOCK_FORMAT, "");
+        if (clockStyle.isEmpty() && settings.getBoolean(ModuleSettings.CLOCK_24_HOUR, false)) {
+            clockStyle = settings.getBoolean(ModuleSettings.CLOCK_SECONDS, false) ? "HH:mm:ss" : "HH:mm";
+        } else if (clockStyle.isEmpty()) {
+            clockStyle = "system_default";
+        }
+        values.put("clock.style", clockStyle);
+        values.put("clock.color", colorString(ModuleSettings.CLOCK_COLOR));
+        StringBuilder output = new StringBuilder("[battery]\n");
+        appendConfig(output, values, "battery");
+        output.append("\n[clock]\n");
+        appendConfig(output, values, "clock");
+        return output.toString();
+    }
+
+    private String colorString(String key) {
+        return String.format(java.util.Locale.ROOT, "#%08X", settings.getInt(key, Color.WHITE));
+    }
+
+    private void appendConfig(StringBuilder output, Map<String, String> values, String section) {
+        for (Map.Entry<String, String> entry : values.entrySet()) {
+            if (entry.getKey().startsWith(section + ".")) {
+                output.append(entry.getKey().substring(section.length() + 1)).append(" = ")
+                        .append(entry.getKey().equals("battery.thickness")
+                                ? entry.getValue() : PortableConfig.quote(entry.getValue()))
+                        .append('\n');
+            }
+        }
     }
 
     private void addSection(LinearLayout page, String label) {

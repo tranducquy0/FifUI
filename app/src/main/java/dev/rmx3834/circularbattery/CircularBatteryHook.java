@@ -336,11 +336,12 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
                     if (view == null) continue;
                     loadSettings(view);
                     if (view.getClass().getName().equals(BATTERY_VIEW)) {
-                        syncDrawable(view);
+                        applyBatterySettings(view);
                     } else if (view instanceof TextView && CLOCK.equals(view.getClass().getName())) {
                         Object clock = view;
                         applyClockSettings(clock);
                         setSecondsPreference(clock);
+                        XposedHelpers.callMethod(clock, "updateShowSeconds");
                         if (!getBooleanSetting(view, ModuleSettings.CLOCK_VISIBLE, true)) {
                             view.setVisibility(View.GONE);
                         } else {
@@ -349,6 +350,22 @@ public final class CircularBatteryHook implements IXposedHookLoadPackage {
                     }
                 }
             }
+        }
+    }
+
+    private static void applyBatterySettings(Object view) {
+        View batteryView = (View) view;
+        if (getBooleanSetting(batteryView, ModuleSettings.BATTERY_ENABLED, true)) {
+            installDrawable(view);
+            return;
+        }
+        try {
+            ImageView icon = (ImageView) getField(view, "mBatteryIconView");
+            boolean unknown = getBooleanField(view, "mBatteryStateUnknown");
+            Object original = getField(view, unknown ? "mUnknownStateDrawable" : "mDrawable");
+            if (original instanceof Drawable) icon.setImageDrawable((Drawable) original);
+        } catch (Throwable t) {
+            XposedBridge.log("CircularBattery: failed to restore stock battery drawable: " + t);
         }
     }
 
